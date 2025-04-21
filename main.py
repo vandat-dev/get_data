@@ -1,13 +1,15 @@
 import os
+import time
 from datetime import datetime
 
 import requests
+import schedule
 
 
 class TransactionService:
     def __init__(self):
         self.base_url = 'https://192.168.30.78:8098'
-        self.last_id_file = 'last_transaction_id.txt'
+        self.last_id_file = 'last_user_id.txt'
 
     def get_transactions(self, params):
         data = {
@@ -45,14 +47,14 @@ class TransactionService:
     def process_new_transactions(self, transactions):
         rows = transactions.get("rows", [])
         if not rows:
-            print("No transactions found.")
+            print("No users found.")
             return
 
         latest_id = rows[0].get("id")
         last_saved_id = self.load_last_id()
 
         if str(latest_id) == str(last_saved_id):
-            print("No new transactions.")
+            print("No new users.")
             return
 
         result = []
@@ -65,13 +67,11 @@ class TransactionService:
         print(result)
 
 
-if __name__ == "__main__":
+def fetch_and_process_transactions():
+    print(f"Chạy task lúc: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     service = TransactionService()
     start_time = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     end_time = datetime.now().replace(hour=23, minute=59, second=59, microsecond=0)
-    print(
-        f"Getting transactions between {start_time.strftime('%Y-%m-%d %H:%M:%S')} and {end_time.strftime('%Y-%m-%d %H:%M:%S')}"
-    )
 
     params = {
         'list': 'true',
@@ -84,3 +84,12 @@ if __name__ == "__main__":
 
     transactions = service.get_transactions(params)
     service.process_new_transactions(transactions)
+
+
+if __name__ == "__main__":
+    fetch_and_process_transactions()
+
+    schedule.every(5).minutes.do(fetch_and_process_transactions)
+    while True:
+        schedule.run_pending()
+        time.sleep(60)
