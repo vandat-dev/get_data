@@ -1,92 +1,102 @@
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import requests
 import schedule
+import urllib3
+from requests.cookies import create_cookie
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 class TransactionService:
-    def __init__(self):
+    def __init__(self, session_token=None):
         self.base_url = 'https://192.168.30.78:8098'
         self.last_id_file = 'last_user_id.txt'
+        self.session = requests.Session()
+        self.session.verify = False
+        if session_token:
+            self.set_cookie(session_token)
+
+    def set_cookie(self, token):
+        """
+        Manually add a SESSION cookie with a long expiry.
+        """
+        cookie = create_cookie(
+            name='SESSION',
+            value=token,
+            domain='192.168.30.78',
+            path='/',
+            secure=True,
+            expires=int((datetime.now() + timedelta(days=365)).timestamp()),
+            rest={'HttpOnly': True, 'SameSite': 'Lax'}
+        )
+        self.session.cookies.set_cookie(cookie)
 
     def get_transactions(self, params):
-        data = {
-            'list': params.get('list', ''),
-            'pageSize': params.get('pageSize', '50'),
-            'beginDate': params.get('beginDate', '2025-04-01 00:00:00'),
-            'endDate': params.get('endDate', '2025-04-21 23:59:59'),
-            'limitCount': params.get('limitCount', '100000'),
-            'pageList': params.get('pageList', 'true')
-        }
-
-        headers = {
-            'Cookie': 'SESSION=OGE1YTc3OGItNDI0NC00YjIxLWE3NDYtZjI3YWM2Mzg5NzNh'
-        }
-
-        response = requests.post(
-            f'{self.base_url}/attTransaction.do',
-            data=data,
-            headers=headers,
-            verify=False
-        )
-
-        return response.json()
+        url = f"{self.base_url}/attTransaction.do"
+        response = self.session.post(url, data=params)
+        try:
+            return response.json()
+        except ValueError:
+            print("Response is not valid JSON:", response.text[:200])
+            return {}
 
     def load_last_id(self):
         if not os.path.exists(self.last_id_file):
             return None
-        with open(self.last_id_file, 'r') as file:
-            return file.read().strip()
+        with open(self.last_id_file, 'r') as f:
+            return f.read().strip()
 
     def save_last_id(self, transaction_id):
-        with open(self.last_id_file, 'w') as file:
-            file.write(str(transaction_id))
+        with open(self.last_id_file, 'w') as f:
+            f.write(str(transaction_id))
 
     def process_new_transactions(self, transactions):
-        rows = transactions.get("rows", [])
+        rows = transactions.get('rows', [])
         if not rows:
-            print("No users found.")
+            print('No transactions found.')
             return
 
-        latest_id = rows[0].get("id")
-        last_saved_id = self.load_last_id()
+        latest_id = rows[0].get('id')
+        last_saved = self.load_last_id()
 
-        if str(latest_id) == str(last_saved_id):
-            print("No new users.")
+        if str(latest_id) == str(last_saved):
+            print('No new transactions.')
             return
 
-        result = []
-        for row in transactions.get("rows", []):
-            if row["id"] == last_saved_id:
+        new_rows = []
+        for row in rows:
+            if str(row.get('id')) == str(last_saved):
                 break
-            result.append(row)
+            new_rows.append(row)
 
         self.save_last_id(latest_id)
-        print(result)
+        print('New transactions:', new_rows)
 
 
 def fetch_and_process_transactions():
-    print(f"Chạy task lúc: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    service = TransactionService()
-    start_time = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    end_time = datetime.now().replace(hour=23, minute=59, second=59, microsecond=0)
+    print(f"Running task at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    token = 'ZDVkMDg3MjYtZDBhYy00NDNkLWJjNzUtYTBhN2E2OTNlMGZk'
+    service = TransactionService(session_token=token)
 
+    start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    end = datetime.now()
     params = {
         'list': 'true',
         'pageSize': '50',
-        'beginDate': start_time.strftime("%Y-%m-%d %H:%M:%S"),
-        'endDate': end_time.strftime("%Y-%m-%d %H:%M:%S"),
+        'beginDate': start.strftime('%Y-%m-%d %H:%M:%S'),
+        'endDate': end.strftime('%Y-%m-%d %H:%M:%S'),
         'limitCount': '100000',
         'pageList': 'true'
     }
 
-    transactions = service.get_transactions(params)
-    service.process_new_transactions(transactions)
+    tx = service.get_transactions(params)
+    service.process_new_transactions(tx)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     fetch_and_process_transactions()
 
     schedule.every(5).minutes.do(fetch_and_process_transactions)
